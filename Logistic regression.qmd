@@ -1,0 +1,188 @@
+---
+title: "Risk factors associated with low infant birth weight"
+format: 
+  html:
+    embed-resources: true
+---
+
+The data was collected at Baystate Medical Center in Springfield in 1986. The dataset includes information about the birth weight of 189 babies and potential risk factors for low birth weight. The goal is to identify risk factors that can help predict the likelihood of low birth weight.
+
+```{r load-packages, message = FALSE, warning=FALSE}
+library(MASS)
+library(tidyverse)
+library(tidymodels)
+library(pROC)
+```
+
+### Data
+
+The data is stored in the `MASS` package under the name `birthwt`. We will load the data, convert into tibble. The goal is to create a prediction model, which can predict low birth weight before the birth of the child.Variables *low*, *race*, *smoke*, *ht* and *ui* are converted to factor variables.
+
+```{r}
+#| eval: true
+?birthwt #All variable details can be found here.
+birthwt <- as_tibble(birthwt) |>
+  select(-bwt) |> #This variable 'bwt' is the birth weight of baby, but we want to predict low birth weight before the birth of the child.
+  mutate(
+    low = factor(low, levels = 0:1, labels = c("no", "yes")),
+    race = factor(race, levels = 1:3, labels = c("white", "black", "other")),
+    smoke = factor(smoke, levels = 0:1, labels = c("no", "yes")),
+    ht = factor(ht, levels = 0:1, labels = c("no", "yes")),
+    ui = factor(ui, levels = 0:1, labels = c("no", "yes"))
+  )
+
+```
+
+### Exploring the data visually for any assosiation between the response `low` and other variables.
+
+```{r}
+#| eval: true
+ggplot(birthwt, aes(x = low, y = age)) + 
+  geom_boxplot()
+
+ggplot(birthwt, aes(x = low, y = lwt)) + 
+  geom_boxplot()
+
+ggplot(birthwt, aes(x = race, fill = low)) + 
+  geom_bar(position = "fill")
+
+ggplot(birthwt, aes(x = smoke, fill = low)) + 
+  geom_bar(position = "fill")
+
+ggplot(birthwt, aes(x = ptl, fill = low)) + 
+  geom_bar(position = "fill")
+
+ggplot(birthwt, aes(x = ui, fill = low)) + 
+  geom_bar(position = "fill")
+
+ggplot(birthwt, aes(x = ftv, fill = low)) + 
+  geom_bar(position = "fill")
+
+ggplot(birthwt, aes(x = ht, fill = low)) + 
+  geom_bar(position = "fill")
+```
+
+We could see that all 5 categorical variables show some influence on the response but it should be noted that bar chart does not show absolute frequency of each level. And the numerical variables `age` and `lwt`(mothers weight) doesn't seem to have much influence on the response.
+
+### Fitting logistic regression model considering all variables except the reponse `low`
+
+```{r}
+#| eval: true
+model_full <- glm(low ~ ., data = birthwt, family = binomial)
+```
+
+### Fitting logistic regression model with stepwise algorithm selection
+
+```{r}
+#| eval: true
+#We start a model with only intercept
+model_step_hybrid <- stats::step(glm(low ~ 1, family = binomial, data = birthwt),
+                   direction = "both",
+                   scope = . ~ age + lwt + race + smoke + ptl + ht + ui + ftv)
+```
+
+This results in the model `low ~ ptl + lwt + ht + race + smoke + ui`
+
+### We know split the model into test and training set to refit the models `model_full` and `model_step_hybrid`.
+
+```{r}
+#| eval: true
+set.seed(111) #to make the results reproducible
+indices <- sample(1:nrow(birthwt), floor(0.8*nrow(birthwt))) #We need to sample 80 % of the data for training.
+train_data <- birthwt[indices,]
+test_data <- birthwt[-indices,]
+```
+
+### Fitting the model
+
+```{r}
+#| eval: true
+model_full_train <- glm(low ~ ., data = train_data, family = binomial)
+model_step_hybrid_train <- glm(low ~ ptl + lwt + ht + race + smoke + ui, data = train_data, family = binomial)
+```
+
+We can now compute predicted values for `test_data` for both models.
+
+```{r}
+#| eval: true
+pred_model_full <- predict(model_full_train, newdata = test_data, type = "response")
+pred_model_step_hybrid <- predict(model_step_hybrid_train, newdata = test_data, type = "response")
+```
+
+To compare both model we create roc object to plot ROC curve.
+
+```{r}
+#| eval: true
+roc_full <- roc(test_data$low ,pred_model_full)
+roc_step <- roc(test_data$low ,pred_model_step_hybrid)
+```
+
+### Plotting ROC curve for 2 models
+
+```{r}
+#| eval: true
+ggroc(list(roc_full, roc_step)) +
+  scale_color_brewer(palette = "Set1", name = "model",
+                     labels = c("full","step")) +
+  geom_segment(
+    aes(x = 1, xend = 0, y = 0, yend = 1), 
+    color="grey", linetype="dashed")
+```
+
+### Computing area under the curve and assessing the best threshhold with Youden’s J statistic.
+
+```{r}
+#| eval: true
+auc(roc_full)
+auc(roc_step)
+
+coords(roc_full, 
+       x = "best", 
+       ret=c("threshold", "specificity", "sensitivity", "accuracy"))
+
+coords(roc_step, 
+       x = "best", 
+       ret=c("threshold", "specificity", "sensitivity", "accuracy"))
+```
+
+From AUC the reduced model `model_step_hybrid` is slightly better. For threshold we maximize J, so for model_full it would be 0.258567 and for model_step_hybrid it would be 0.2584582.
+
+
+### Comparing both models with cross validation
+
+```{r}
+#| eval: true
+log_mod <- logistic_reg(mode = "classification", engine = "glm")
+folds <- vfold_cv(birthwt, v = 5) #Creating 5 folds for cross validation
+```
+
+### Creating a work flow and fitting the models
+
+```{r}
+#| eval: true
+model_full_cv <-
+  workflow() |>
+  add_model(log_mod) |>
+  add_formula(low ~ .)
+
+model_full_cv_fit <- model_full_cv |>
+  fit_resamples(folds)
+
+model_step_cv <-
+  workflow() |>
+  add_model(log_mod) |>
+  add_formula(low ~ ptl + lwt + ht + race + smoke + ui)
+
+model_step_cv_fit <- model_step_cv |>
+  fit_resamples(folds)
+```
+
+### Again comparing both models from cross validation results
+
+```{r}
+#| eval: true
+collect_metrics(model_full_cv_fit, type = "wide")
+collect_metrics(model_step_cv_fit, type = "wide")
+```
+From the result of cross validation model_step_hybrid has slightly higher mean roc_auc and accuracy over 5 folds.
+
