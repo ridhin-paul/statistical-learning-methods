@@ -1,6 +1,8 @@
 ---
 title: "Bike rentals in DC"
-format: html
+format: 
+  html:
+    embed-resources: true
 ---
 
 ## Data
