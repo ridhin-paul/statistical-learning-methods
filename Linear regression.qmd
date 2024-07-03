@@ -1,0 +1,143 @@
+---
+title: "Bike rentals in DC"
+format: html
+---
+
+## Data
+
+Source: [UCI Machine Learning Repository - Bike Sharing Dataset](https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset)
+
+The data include daily bike rental counts (by members and casual users) of Capital Bikeshare in Washington, DC in 2011 and 2012 as well as weather information on these days.
+
+```{r load-packages, message = FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+```
+
+### Reading the data
+
+The data is loaded and the variables `season`, `yr`, `holiday` and `weathersit` is converted into factor type.
+
+```{r}
+#| echo: true
+#| warning: false
+dcbikeshare <- read_csv("data/dcbikeshare.csv") |>
+  mutate(
+    season = factor(season, 
+                    levels = c(2,3,4,1), 
+                    labels = c("spring","summer","fall","winter")),
+    holiday = factor(holiday, 
+                     levels = 0:1, 
+                     labels = c("no", "yes")),
+    workingday = factor(workingday, 
+                        levels = 0:1, 
+                        labels = c("no", "yes")),
+    yr = factor(yr, 
+                level = 0:1, 
+                labels = 2011:2012),
+    weathersit = factor(weathersit, 
+                        levels = 1:4, 
+                        labels = c("clear", "mist", "light precipitation", "heavy precipition"))
+    
+  )
+
+glimpse(dcbikeshare)
+```
+
+### Bike rentals vs. Date plot with temperature
+
+```{r}
+#| eval: true
+dcbikeshare |> 
+  ggplot(mapping = aes(x = dteday, y = cnt, color = temp * 41)) + 
+    geom_point() + 
+    labs(x = "Date", y = "Bike rentals", color = "Temperature (C)", title = "Bike rentals in DC, 2011 and 2012", subtitle = "Warmer temperature assosiated with more bike rentals") +
+  scale_color_gradient(low = "blue", high = "red") +
+  theme_minimal()
+```
+
+`temp`, `atemp`, `hum`, `windspeed` are `standardised` by a factor of 41, 50, 100 and 67 (as per data description).
+
+```{r}
+#| eval: true
+dcbikeshare <- dcbikeshare |> 
+  mutate(temp = temp * 41, atemp = atemp * 50, 
+         hum = hum * 100, windspeed = windspeed * 67)
+```
+
+### Creating a pairs plot refer the formula below
+
+Checking for multicollinearity
+
+```{r}
+#| eval: true
+pairs(cnt ~ temp +atemp + hum + windspeed, data = dcbikeshare)
+```
+
+We can see a positive correlation between `temp` and `cnt` als between `cnt` and `atemp`, hence collinearity exist between `temp` and `atemp`. Variables `hum` and `windspeed` doesn't show any strong relationship with response.
+
+### Fitting linear regression model predicting total daily bike rentals from daily temperature
+
+```{r}
+#| eval: true
+model_temp <- lm(cnt ~ temp, data = dcbikeshare)
+summary(model_temp)
+```
+
+The fitted linear model is given by the equation $\hat{y}_i \approx 1214.421 - 161.96885 \cdot x_i$ <br>
+
+And the obtained R-squared value is 0.3937.
+
+### Fitting the model with rest of the variables
+
+```{r}
+#| eval: true
+model_full <- lm(cnt ~ season + yr + holiday + workingday + weathersit + temp + atemp + 
+                   hum + windspeed , data = dcbikeshare)
+
+summary(model_full)
+```
+
+Adjusted R-squared obtained is 0.8197 comparing it with previoius model this one is prefferred.
+
+### Splitting the model to training and test dataset
+
+```{r}
+#| eval: true
+n <- nrow(dcbikeshare)
+train_id <- sample(1:n, floor(0.9 * n))  # split 90/10
+train <- dcbikeshare[train_id, ]
+test <- dcbikeshare[-train_id, ]
+```
+
+#Refitting the earlier models with test dataset
+
+```{r}
+#| eval: true
+model_temp_train <- lm(cnt ~ temp, data = train)
+model_full_train <- lm(cnt ~ season + yr + holiday + workingday + 
+                         weathersit + temp + atemp + 
+                   hum + windspeed , data = train)
+```
+
+Extracting prediction from the fitted model with test data
+
+```{r}
+#| eval: true
+pred_temp <- predict(model_temp_train, newdata = test)
+pred_full <- predict(model_full_train, newdata = test)
+```
+
+### Computing the RMSE of predicted data
+
+```{r}
+#| eval: true
+
+rmse <- function(u, v){
+  sqrt(mean((u - v)^2))
+}
+rmse(test$cnt ,pred_temp)
+rmse(test$cnt ,pred_full)
+```
+
+RMSE of `mode_temp` is higher than that of `model_full` hence `model_full` is preferred.
