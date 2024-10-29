@@ -147,7 +147,6 @@ coords(roc_step,
 
 From AUC the reduced model `model_step_hybrid` is slightly better. For threshold we maximize J, so for model_full it would be 0.258567 and for model_step_hybrid it would be 0.2584582.
 
-
 ### Comparing both models with cross validation
 
 ```{r}
@@ -184,5 +183,5 @@ model_step_cv_fit <- model_step_cv |>
 collect_metrics(model_full_cv_fit, type = "wide")
 collect_metrics(model_step_cv_fit, type = "wide")
 ```
-From the result of cross validation model_step_hybrid has slightly higher mean roc_auc and accuracy over 5 folds.
 
+From the result of cross validation model_step_hybrid has slightly higher mean roc_auc and accuracy over 5 folds.
